@@ -142,6 +142,11 @@ def fmt_size(size) -> str:
     return "%.1f PB" % number
 
 
+def md_alt(name: str) -> str:
+    """Markdown 图片的 alt 文本：去掉会破坏语法的方括号与换行。"""
+    return str(name).replace("[", "(").replace("]", ")").replace("\n", " ").strip()
+
+
 def classify_name(name: str) -> str:
     """文件类型：优先用 describe.classify，缺失时用内置扩展名表。"""
     if describe_module is not None:
@@ -469,6 +474,21 @@ class ItemStore:
 
         self._mutate(operation)
 
+    def mark_processing(self, item_id: str) -> dict:
+        """重新生成描述前重置状态；原始文件保持不变。"""
+        def operation(items):
+            for item in items:
+                if item["id"] == item_id:
+                    item["status"] = "processing"
+                    item["description"] = ""
+                    item["content"] = ""
+                    item["error"] = ""
+                    item["updated_at"] = now_iso()
+                    return dict(item)
+            raise NotFound("资料不存在")
+
+        return self._mutate(operation)
+
     def update_item(self, item_id: str, updates: dict) -> dict:
         def operation(items):
             for item in items:
@@ -680,11 +700,24 @@ class Handler(BaseHTTPRequestHandler):
         return item_id
 
     @staticmethod
+    def _redescribe_id(path: str):
+        prefix = "/api/items/"
+        suffix = "/redescribe"
+        if not path.startswith(prefix) or not path.endswith(suffix):
+            return None
+        item_id = path[len(prefix):-len(suffix)]
+        if not item_id or "/" in item_id:
+            return None
+        return item_id
+
+    @staticmethod
     def _allowed_methods(path: str):
         """已知路径允许的方法；未知路径返回 None。"""
         if path in ("/healthz", "/api/state"):
             return "GET"
         if path == "/api/items":
+            return "POST"
+        if Handler._redescribe_id(path) is not None:
             return "POST"
         if Handler._item_id(path) is not None:
             return "PATCH, DELETE"
@@ -731,6 +764,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self._request_path()
         if path == "/api/items":
             self._handle_upload()
+        elif self._redescribe_id(path) is not None:
+            self._handle_redescribe(self._redescribe_id(path))
         else:
             self._reject_wrong_method(path)
 
@@ -851,6 +886,18 @@ class Handler(BaseHTTPRequestHandler):
         log_out("[%s] 收到上传：%s（%s，%s）" % (now_iso(), name, KIND_LABELS.get(kind), fmt_size(written)))
         self._send_json(201, {"item": item})
 
+    def _handle_redescribe(self, item_id: str) -> None:
+        """仅重新生成描述，原始文件保持不动。"""
+        store = self.server.store
+        item = store.get_item(item_id)
+        path = store.file_path(item)
+        if not os.path.isfile(path):
+            raise NotFound("文件不存在")
+        item = store.mark_processing(item_id)
+        self.server.worker.submit(item_id, path, item["name"])
+        log_out("[%s] 重新生成描述：%s" % (now_iso(), item["name"]))
+        self._send_json(202, {"item": item})
+
     # ---- 智能体分享 ----
 
     def _serve_share(self, path: str) -> None:
@@ -888,8 +935,9 @@ class Handler(BaseHTTPRequestHandler):
             "# 超级上下文 · 资料清单",
             "",
             "> 共 %d 份资料 · 更新于 %s" % (len(items), fmt_time(state["updated_at"])),
-            "> 使用方式：阅读每份资料的「描述」，需要哪份就 GET 该条的「资料链接」获取原始文件；"
-            "需要文字内容/转写时 GET「详情链接」。",
+            "> 使用方式：阅读每份资料的「描述」判断是否相关；需要素材本身时 GET 该条的「原始文件」——",
+            "> 返回上传时的原始字节（图片 / 音频 / 视频保持原样，Content-Type 正确，不会转成文本），",
+            "> 智能体可直接下载后用多模态模型处理。文字信息（文档摘要、音频转写、视频画面概述）见「详情链接」。",
             "> 链接已含访问令牌，直接请求即可，无需账号密码。",
         ]
         for index, item in enumerate(items, 1):
@@ -907,12 +955,17 @@ class Handler(BaseHTTPRequestHandler):
             lines.extend([
                 "",
                 "## %d. %s（%s）" % (index, item["name"], label),
-                "- 资料链接：%s/files/%s" % (base, item["id"]),
+                "- 原始文件：%s/files/%s" % (base, item["id"]),
                 "- 详情链接：%s/items/%s.md" % (base, item["id"]),
-                "- 类型：%s · 大小：%s · 上传：%s"
-                % (label, fmt_size(item["size"]), fmt_time(item["created_at"])),
+                "- 类型：%s · MIME：%s · 大小：%s · 上传：%s"
+                % (label, item["mime"] or "未知",
+                   fmt_size(item["size"]), fmt_time(item["created_at"])),
                 "- 描述：%s" % description,
             ])
+            if item["kind"] == "image":
+                # 支持渲染 Markdown 图片的智能体可直接看到原图
+                lines.append("- 图片：![%s](%s/files/%s)"
+                             % (md_alt(item["name"]), base, item["id"]))
         return "\n".join(lines) + "\n"
 
     def _share_index_json(self) -> dict:
@@ -931,6 +984,7 @@ class Handler(BaseHTTPRequestHandler):
                 "error": item["error"],
                 "created_at": item["created_at"],
                 "files_url": "%s/files/%s" % (base, item["id"]),
+                "original_url": "%s/files/%s" % (base, item["id"]),
                 "detail_url": "%s/items/%s.md" % (base, item["id"]),
             })
         return {
@@ -944,21 +998,31 @@ class Handler(BaseHTTPRequestHandler):
         label = KIND_LABELS.get(item["kind"], "其他")
         description = item["description"].strip() or "（无描述）"
         content = item["content"].strip()
+        raw_url = "%s/files/%s" % (base, item["id"])
         lines = [
             "# %s" % item["name"],
             "",
-            "- 类型：%s" % label,
+            "- 类型：%s · MIME：%s" % (label, item["mime"] or "未知"),
             "- 大小：%s" % fmt_size(item["size"]),
             "- 上传：%s" % fmt_time(item["created_at"]),
-            "- 资料链接：%s/files/%s" % (base, item["id"]),
             "",
-            "## 描述",
+            "## 原始文件",
             "",
-            description,
+            "- 链接：%s" % raw_url,
+            "- 说明：返回上传时的原始字节（未转文本），可直接下载或交给多模态模型处理。",
         ]
+        if item["kind"] == "image":
+            lines.extend(["", "![%s](%s)" % (md_alt(item["name"]), raw_url)])
+        lines.extend(["", "## 描述", "", description])
         if item["status"] == "error":
             lines.extend(["", "> 描述生成失败：%s" % (item["error"] or "未知原因")])
-        lines.extend(["", "## 内容", "", content or "（无可提取文本内容）"])
+        if content:
+            lines.extend(["", "## 内容（辅助文本，可选）", "", content])
+        elif item["kind"] == "image":
+            lines.extend(["", "## 内容（辅助文本，可选）", "",
+                          "（图片没有辅助文本：请直接使用上面的「原始文件」，把图片交给模型处理。）"])
+        else:
+            lines.extend(["", "## 内容（辅助文本，可选）", "", "（无辅助文本内容）"])
         return "\n".join(lines) + "\n"
 
     def _serve_raw(self, item_id: str) -> None:

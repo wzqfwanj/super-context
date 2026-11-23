@@ -82,7 +82,7 @@ def describe_file(path: str, name: str, settings: Settings) -> dict:
 
 | 类型 | 处理 |
 | --- | --- |
-| 图片 `image` | `qwen3-vl-plus` 中文描述：主体、场景、图中文字（OCR 原文）、风格/用途，≤250 字。`content` 可为空字符串 |
+| 图片 `image` | `qwen3-vl-plus` 写**用于检索的简短描述**：是什么图片/主体/场景/用途，≤150 字；**不要逐字转录图中文字**，证件/票据/简历等含个人信息的图片只概括类型与用途，不输出号码、住址、电话等隐私字段；`content` 为空字符串（图片细节由智能体获取原图后自行处理） |
 | 文档 `document` | 先提取文本：纯文本类直接 decode（utf-8 → gbk 兜底）；`.docx` 用 zipfile 读 `word/document.xml`；`.pptx` 读幻灯片 `a:t`；`.xlsx` 读 `sharedStrings.xml`（+ inline strings）；`.pdf` 用 `pdftotext -layout`（无命令时用 `pdftoppm` 渲前 3 页 → `qwen3-vl-plus` 识图；都没有则报错"PDF 文本提取不可用"）。提取结果截断到 `max_text_chars` 作为 `content`；再用 `qwen-plus` 写 ≤120 字描述。文本为空且无法识图时给出兜底描述 |
 | 音频 `audio` | ffprobe 取时长；ffmpeg 转 16k 单声道 wav；>240s 按 240s 分段 ASR 后拼接（总时长 >30 分钟只转前 30 分钟并注明）。`content` = 转写全文，`description` = `qwen-plus` ≤120 字摘要 |
 | 视频 `video` | 见上 |
@@ -101,6 +101,7 @@ def describe_file(path: str, name: str, settings: Settings) -> dict:
 | GET | `api/state` | `{updated_at, token, items:[...]}` |
 | POST | `api/items?name=<urlencoded>` | 请求体=文件原始字节；201 返回 `{item}`，item.status=processing |
 | PATCH | `api/items/{id}` | JSON `{name?, description?, content?}` → `{item}` |
+| POST | `api/items/{id}/redescribe` | 重新生成该条描述（原始文件不动）→ 202 `{item}`（status=processing） |
 | DELETE | `api/items/{id}` | 删除条目与文件 → `{ok:true}` |
 | GET | `api/items/{id}/raw` | 原始文件（Content-Type 按 mime，inline） |
 | GET | `healthz` | `{ok:true}` |
@@ -121,17 +122,21 @@ def describe_file(path: str, name: str, settings: Settings) -> dict:
 # 超级上下文 · 资料清单
 
 > 共 N 份资料 · 更新于 2026-11-23 11:30
-> 使用方式：阅读每份资料的「描述」，需要哪份就 GET 该条「资料链接」下载原始文件；需要文字内容/转写时 GET「详情链接」。
+> 使用方式：阅读每份资料的「描述」判断是否相关；需要素材本身时 GET 该条的「原始文件」——
+> 返回上传时的原始字节（图片 / 音频 / 视频保持原样，Content-Type 正确，不会转成文本），
+> 智能体可直接下载后用多模态模型处理。文字信息见「详情链接」。
 > 链接已含访问令牌，直接请求即可，无需账号密码。
 
 ## 1. 文件名（图片）
-- 资料链接：https://wkeeli.cn/context/s/<token>/files/<id>
+- 原始文件：https://wkeeli.cn/context/s/<token>/files/<id>
 - 详情链接：https://wkeeli.cn/context/s/<token>/items/<id>.md
-- 类型：图片 · 大小：1.2 MB · 上传：2026-11-23 11:30
+- 类型：图片 · MIME：image/jpeg · 大小：1.2 MB · 上传：2026-11-23 11:30
 - 描述：……
+- 图片：![文件名](https://wkeeli.cn/context/s/<token>/files/<id>)
 ```
 
 - 安全/健壮性：文件名去路径与控制字符；静态目录防穿越；请求体上限 413；未知 API 404、方法错 405；全部错误 `{"error":"中文原因"}`；JSON 原子落盘（临时文件 + os.replace）；上传后后台线程生成描述，前端轮询。
+- 原始文件必须原样保存、原样返回（不做转码/转文本）；描述与 `content` 只是检索与辅助信息。
 
 ## 5. web 前端（web-ui 交付）
 

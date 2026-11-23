@@ -410,11 +410,15 @@
     copyBtn.type = "button";
     copyBtn.title = "复制这一份资料的详情链接";
     var download = makeEl("a", "btn btn-sm", "下载");
+    var redescBtn = makeEl("button", "btn btn-sm", "重新生成描述");
+    redescBtn.type = "button";
+    redescBtn.title = "只重新生成描述，原始文件保持不变";
     var delBtn = makeEl("button", "btn btn-sm", "删除");
     delBtn.type = "button";
     delBtn.title = "删除这份资料";
     actions.appendChild(copyBtn);
     actions.appendChild(download);
+    actions.appendChild(redescBtn);
     actions.appendChild(delBtn);
 
     body.appendChild(head);
@@ -435,6 +439,7 @@
       player: player,
       copyBtn: copyBtn,
       download: download,
+      redescBtn: redescBtn,
       delBtn: delBtn,
       itemId: item.id,
       itemName: "",
@@ -446,6 +451,9 @@
 
     copyBtn.addEventListener("click", function () {
       copyAndReport(itemLink(refs.itemId), "已复制「" + refs.itemName + "」的链接");
+    });
+    redescBtn.addEventListener("click", function () {
+      redescribeItem(refs);
     });
     delBtn.addEventListener("click", function () {
       removeItem(refs);
@@ -533,6 +541,21 @@
     refs.download.href = rawLink(item.id);
     refs.download.setAttribute("download", refs.itemName);
     refs.download.title = "下载原始文件";
+    refs.redescBtn.disabled = status === "processing";
+  }
+
+  function redescribeItem(refs) {
+    if (refs.redescBtn.disabled) return;
+    refs.redescBtn.disabled = true;
+    setFeedback("正在重新生成「" + refs.itemName + "」的描述…", false);
+    fetchJson("api/items/" + encodeURIComponent(refs.itemId) + "/redescribe", "POST")
+      .then(function () {
+        loadState({ silent: true });
+      })
+      .catch(function (err) {
+        refs.redescBtn.disabled = false;
+        setFeedback("重新生成失败：" + friendlyError(err), true);
+      });
   }
 
   function removeItem(refs) {

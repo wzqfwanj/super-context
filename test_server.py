@@ -269,7 +269,6 @@ class PatchDeleteTest(ServerTestCase):
 
 
 class ShareTest(ServerTestCase):
-
     def test_share_index_markdown(self):
         _, payload, _ = self.upload("图.png", b"pngdata")
         item = self.wait_status(payload["item"]["id"])
@@ -280,8 +279,13 @@ class ShareTest(ServerTestCase):
         text = data.decode("utf-8")
         self.assertIn("图.png", text)
         self.assertIn("描述：图.png", text)
+        self.assertIn("- 原始文件：", text)
+        self.assertIn("MIME：image/png", text)
         self.assertIn("https://example.test/context/s/%s/files/%s" % (token, item["id"]), text)
         self.assertIn("https://example.test/context/s/%s/items/%s.md" % (token, item["id"]), text)
+        # 图片在清单里带 Markdown 图片直链，支持渲染图片的智能体可直接取原图
+        self.assertIn("![图.png](https://example.test/context/s/%s/files/%s)"
+                      % (token, item["id"]), text)
 
     def test_share_index_json(self):
         _, payload, _ = self.upload("j.txt", b"j")
@@ -326,6 +330,33 @@ class ShareTest(ServerTestCase):
         self.assertEqual(response.status, 404)
         response, _ = self.request("GET", "/s/%s/nope" % token)
         self.assertEqual(response.status, 404)
+
+
+class RedescribeTest(ServerTestCase):
+    """重新生成描述：只更新描述，原始文件字节不变。"""
+
+    def test_redescribe_regenerates_description(self):
+        _, payload, _ = self.upload("r.txt", b"hello")
+        item = self.wait_status(payload["item"]["id"])
+        self.json_request("PATCH", "/api/items/%s" % item["id"],
+                          {"description": "旧描述"})
+        response, payload, _ = self.json_request(
+            "POST", "/api/items/%s/redescribe" % item["id"])
+        self.assertEqual(response.status, 202)
+        self.assertEqual(payload["item"]["status"], "processing")
+        regenerated = self.wait_status(item["id"])
+        self.assertEqual(regenerated["description"], "描述：r.txt")
+        _, raw = self.request("GET", "/api/items/%s/raw" % item["id"])
+        self.assertEqual(raw, b"hello")
+
+    def test_redescribe_unknown_item(self):
+        response, body, _ = self.json_request("POST", "/api/items/deadbeef/redescribe")
+        self.assertEqual(response.status, 404)
+
+    def test_redescribe_wrong_method(self):
+        response, _, _ = self.json_request("GET", "/api/items/deadbeef/redescribe")
+        self.assertEqual(response.status, 405)
+        self.assertEqual(response.getheader("Allow"), "POST")
 
 
 class StaticAndMethodTest(ServerTestCase):

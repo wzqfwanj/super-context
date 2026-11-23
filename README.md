@@ -1,6 +1,6 @@
 # 超级上下文（super-context）
 
-把资料传到页面上，自动生成描述；把**一个链接**交给智能体，智能体按描述取用对应资料。
+把资料传到页面上，自动生成**用于检索的简短描述**；把**一个链接**交给智能体，智能体按描述找到并取用对应的**原始资料**。图片 / 音频 / 视频始终按上传的原始字节保存和返回，不会被转成文本。
 
 - 线上地址：<https://wkeeli.cn/context/>（复用 wkeeli.cn 全站登录）
 - 源码：<https://github.com/wzqfwanj/super-context>（MIT License）
@@ -10,11 +10,11 @@
 
 ## 功能
 
-- 上传任意资料：图片、文档、音频、视频（含 `.docx/.pptx/.xlsx/.pdf` 等）
-- 上传后后台自动生成两类内容：
-  - `description`：≤300 字的中文描述，给智能体判断相关性用
-  - `content`：可作上下文的正文 / 转写 / 画面描述（文档全文、音频转写、视频画面+语音）
-- 页面：拖拽/多选上传、上传进度、图片缩略图、音视频原生播放器、描述生成中自动轮询、删除、复制链接
+- 上传任意资料：图片、文档、音频、视频（含 `.docx/.pptx/.xlsx/.pdf` 等）；**原始文件原样保存，随时可取回**
+- 上传后后台自动生成：
+  - `description`：简短中文描述（图片 ≤150 字、文档/音频 ≤120 字），只用于判断相关性；证件类图片不转录证件号码、住址等隐私字段
+  - `content`：可选的辅助文本（文档全文、音频转写、视频画面概述）——**不替代原始文件**，图片没有 `content`
+- 页面：拖拽/多选上传、上传进度、图片缩略图、音视频原生播放器、描述生成中自动轮询、**重新生成描述**、删除、复制链接
 - 智能体链接：不需要账号密码，凭 URL 里的 32 位 token 访问
   - `GET /context/s/<token>/index.md` —— 全部资料清单（描述 + 绝对链接）
   - `GET /context/s/<token>/index.json` —— 同上 JSON
@@ -36,16 +36,32 @@ https://wkeeli.cn/context/s/<token>/index.md
 # 超级上下文 · 资料清单
 
 > 共 2 份资料 · 更新于 2026-11-23 11:50
-> 使用方式：阅读每份资料的「描述」，需要哪份就 GET 该条「资料链接」获取原始文件……
+> 使用方式：阅读每份资料的「描述」判断是否相关；需要素材本身时 GET 该条的「原始文件」——
+> 返回上传时的原始字节（图片 / 音频 / 视频保持原样，Content-Type 正确，不会转成文本）……
 
-## 1. 需求说明.docx（文档）
-- 资料链接：https://wkeeli.cn/context/s/<token>/files/8aa52100
-- 详情链接：https://wkeeli.cn/context/s/<token>/items/8aa52100.md
-- 类型：文档 · 大小：825 B · 上传：2026-11-23 11:46
-- 描述：用户可上传图片、文档、音频、视频四类资料……
+## 1. 毕业证.jpg（图片）
+- 原始文件：https://wkeeli.cn/context/s/<token>/files/998765ef
+- 详情链接：https://wkeeli.cn/context/s/<token>/items/998765ef.md
+- 类型：图片 · MIME：image/jpeg · 大小：4.1 MB · 上传：2026-11-23 12:00
+- 描述：普通高等学校毕业证书照片，含持证人信息与学校公章，用于学历证明。
+- 图片：![毕业证.jpg](https://wkeeli.cn/context/s/<token>/files/998765ef)
 ```
 
-智能体按描述选需要的条目，再 GET「资料链接」或「详情链接」即可，无需任何认证。
+智能体按描述选需要的条目；**要处理图片时 GET「原始文件」**，得到的就是原图。
+
+### 需要原图 / 原音频 / 原视频时
+
+「原始文件」返回上传时的原始字节，图片不会变成文字。两种常见用法：
+
+```bash
+# 1) 下载原图，交给支持视觉的模型（或 base64 后调百炼 qwen3-vl-plus）
+curl -L "https://wkeeli.cn/context/s/<token>/files/<id>" -o photo.jpg
+```
+
+2. 支持渲染 Markdown 图片的智能体：清单里图片条目带 `![文件名](url)`，可直接把原图作为图片输入。
+
+> 服务只负责保存、索引、分发资料；「描述」是检索索引，真正“看懂”图片的是智能体使用的多模态模型。
+> 纯文本模型只能读描述，需要读图能力时请让智能体调用视觉模型（或换多模态模型）。
 
 ## 本地运行
 
@@ -79,7 +95,7 @@ python3 server.py 8083       # 或指定端口
 测试：
 
 ```bash
-python test_server.py     # 31 个接口/存储测试，不需要网络
+python test_server.py     # 34 个接口/存储测试，不需要网络
 python test_describe.py   # 分类/文本提取/兜底等离线测试，不需要网络
 ```
 
@@ -92,6 +108,7 @@ python test_describe.py   # 分类/文本提取/兜底等离线测试，不需�
 | GET | `api/state` | `{updated_at, token, max_upload_mb, items}` |
 | POST | `api/items?name=<文件名>` | 请求体=文件原始字节 → `201 {item}`（status=processing） |
 | PATCH | `api/items/{id}` | `{name?, description?, content?}` → `{item}` |
+| POST | `api/items/{id}/redescribe` | 只重新生成描述（原始文件不变）→ `202 {item}` |
 | DELETE | `api/items/{id}` | 删除条目与文件 → `{ok:true}` |
 | GET | `api/items/{id}/raw` | 原始文件（inline，带下载文件名） |
 | GET | `healthz` | 健康检查 → `{ok:true}` |
