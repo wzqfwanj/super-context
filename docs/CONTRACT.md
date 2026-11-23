@@ -80,12 +80,14 @@ def describe_file(path: str, name: str, settings: Settings) -> dict:
 
 媒体处理细则：
 
+> `description` 是**给智能体做路由的极简标签**（≤40/50 字），不是摘要、不是转录；`content` 是可选辅助文本，原始文件永远原样保留。
+
 | 类型 | 处理 |
 | --- | --- |
-| 图片 `image` | `qwen3-vl-plus` 写**用于检索的简短描述**：是什么图片/主体/场景/用途，≤150 字；**不要逐字转录图中文字**，证件/票据/简历等含个人信息的图片只概括类型与用途，不输出号码、住址、电话等隐私字段；`content` 为空字符串（图片细节由智能体获取原图后自行处理） |
-| 文档 `document` | 先提取文本：纯文本类直接 decode（utf-8 → gbk 兜底）；`.docx` 用 zipfile 读 `word/document.xml`；`.pptx` 读幻灯片 `a:t`；`.xlsx` 读 `sharedStrings.xml`（+ inline strings）；`.pdf` 用 `pdftotext -layout`（无命令时用 `pdftoppm` 渲前 3 页 → `qwen3-vl-plus` 识图；都没有则报错"PDF 文本提取不可用"）。提取结果截断到 `max_text_chars` 作为 `content`；再用 `qwen-plus` 写 ≤120 字描述。文本为空且无法识图时给出兜底描述 |
-| 音频 `audio` | ffprobe 取时长；ffmpeg 转 16k 单声道 wav；>240s 按 240s 分段 ASR 后拼接（总时长 >30 分钟只转前 30 分钟并注明）。`content` = 转写全文，`description` = `qwen-plus` ≤120 字摘要 |
-| 视频 `video` | 见上 |
+| 图片 `image` | `qwen3-vl-plus` 写**给智能体路由用的极简标签**（≤40 字）：图片类型 + 最关键、最能区分它的对象/实体（机构名、证件/文件类型、主题场景）；不逐字转录图中文字，证件/票据/简历等不输出号码、住址、电话等隐私字段；`content` 为空字符串（图片细节由智能体获取原图后自行处理） |
+| 文档 `document` | 先提取文本：纯文本类直接 decode（utf-8 → gbk 兜底）；`.docx` 用 zipfile 读 `word/document.xml`；`.pptx` 读幻灯片 `a:t`；`.xlsx` 读 `sharedStrings.xml`（+ inline strings）；`.pdf` 用 `pdftotext -layout`（无命令时用 `pdftoppm` 渲前 3 页 → `qwen3-vl-plus` 识图；都没有则报错"PDF 文本提取不可用"）。提取结果截断到 `max_text_chars` 作为 `content`；再用 `qwen-plus` 写 ≤40 字路由标签（`资料类型：关键实体/主题`）。文本为空且无法识图时给出兜底描述 |
+| 音频 `audio` | ffprobe 取时长；ffmpeg 转 16k 单声道 wav；>240s 按 240s 分段 ASR 后拼接（总时长 >30 分钟只转前 30 分钟并注明）。`content` = 转写全文，`description` = `qwen-plus` ≤40 字路由标签 |
+| 视频 `video` | 见上；`description` = 综合画面与语音后的 ≤50 字路由标签 |
 | 其他 `other` | 兜底描述 `《文件名》（大小 X）`，尝试按文本 decode 一次，失败则 content 为空 |
 
 约束：只用标准库 + `subprocess` 调 ffmpeg/ffprobe/pdftotext/pdftoppm；临时文件用 `tempfile`，必须清理；所有网络调用有超时与一次重试；日志写 stderr（带时间戳）；单个文件处理建议控制在 5 分钟内。

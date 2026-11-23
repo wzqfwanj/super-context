@@ -53,13 +53,13 @@ CHAT_PATH = "/compatible-mode/v1/chat/completions"
 _IMAGE_PASSTHROUGH_MIME = ("image/jpeg", "image/png", "image/webp")
 _IMAGE_MAX_BYTES = 8 * 1024 * 1024
 
-# 描述长度上限（契约）
+# 描述是给智能体做「路由」用的极简标签：越短越准越好（不是摘要、不是转录）
 _DESC_LIMITS = {
-    "image": 150,
-    "document": 120,
-    "audio": 120,
-    "video": 200,
-    "other": 300,
+    "image": 40,
+    "document": 40,
+    "audio": 40,
+    "video": 50,
+    "other": 60,
 }
 
 # ASR 分段与总时长上限
@@ -389,10 +389,24 @@ def _chat_asr(settings: Settings, wav_path: str) -> str:
     return _message_text(_chat(settings, payload))
 
 
+def _clean_label(text: str) -> str:
+    """把模型输出整理成一行路由标签：去前缀、去行尾标点。"""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    text = text.splitlines()[0].strip()
+    for prefix in ("路由标签：", "路由标签:", "标签：", "标签:", "描述：", "描述:",
+                   "这是什么：", "这是什么:", "这是什么 ", "这是什么"):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+    return text.strip("。；;，,、 \t\"'“”‘’")
+
+
 def _summarize(settings: Settings, text: str, limit: int, subject: str) -> str:
     prompt = (
-        "请用简体中文为下面的%s写一段不超过 %d 字的概括，"
-        "只输出概括正文，不要标题、不要列表、不要 Markdown、不要引号。\n\n%s"
+        "下面是一份%s的内容。请用简体中文写出它的检索路由标签，格式如「资料类型：关键实体/主题」，"
+        "例如「项目周会记录：超级上下文v1」「需求文档：路由标签生成」。不超过 %d 字，一句话，"
+        "只输出标签本身；不要复述细节，不要出现「这是什么」等字样，不要 Markdown、引号或句号。\n\n%s"
         % (subject, limit, _clip(text, 8000))
     )
     return _chat_text(settings, prompt)
@@ -668,18 +682,20 @@ def _image_data_url(path: str, name: str, temp_dir: str, settings: Settings) -> 
 
 
 _IMAGE_PROMPT = (
-    "请用简体中文写一段图片描述，供他人判断这张图片是否与任务相关："
-    "说明它是什么（照片 / 截图 / 证件 / 图表 / 票据等）、主体与场景、大致用途或关键主题。"
-    "不要逐字转录图中文字；涉及证件、票据、简历等含个人信息的图片时，"
-    "只概括文件类型和用途，绝对不要输出证件号码、住址、电话、邮箱等隐私字段。"
-    "不超过150字；只输出描述正文，不要标题、不要列表、不要 Markdown。"
+    "请用简体中文给这张图片写一个用于检索路由的极简标签，格式是「图片类型：最关键、最能区分的实体 + 种类」，"
+    "例如「截图：开发约束配置界面」「毕业证：南昌理工学院」「证件：居民身份证人像面」。"
+    "证书类要注明颁发机构（学校或单位）。"
+    "中国居民身份证分两面，必须写对：带头像、姓名和公民身份号码的一面叫「人像面」；"
+    "带国徽、签发机关和有效期限的一面叫「国徽面」。"
+    "不超过40字，一句话；不要描述细节，不要逐字转录图中文字，"
+    "不要输出证件号码、住址、电话、邮箱等隐私字段。"
+    "只输出标签本身，不要句号、引号、列表或 Markdown。"
 )
 
 _VIDEO_PROMPT = (
-    "这些是从同一段视频中按时间顺序均匀抽取的画面帧。请用简体中文写一段不超过200字的视频内容描述："
-    "画面主体与场景、关键动作或变化、大致主题或用途，便于他人判断是否相关。"
-    "不要逐字转录画面文字/字幕，不要输出个人信息。"
-    "只输出描述正文，不要标题、不要列表、不要 Markdown。"
+    "这些是从同一段视频中按时间顺序均匀抽取的画面帧。请用简体中文给这段视频写一个用于检索路由的极简标签："
+    "视频主题 / 场景 + 最关键内容，不超过50字，一句话。不要复述细节，不要逐字转录字幕，不要输出个人信息。"
+    "只输出标签本身，不要句号、引号、列表或 Markdown。"
 )
 
 _PDF_OCR_PROMPT = (
@@ -1217,7 +1233,8 @@ def describe_file(path: str, name: str, settings: Settings = None) -> dict:
 
         handler = _HANDLERS.get(kind, _describe_other)
         description, content, partial_error = handler(path, display_name, settings, size)
-        result["description"] = _clip(description, _DESC_LIMITS.get(kind, 300))
+        result["description"] = _clip(_clean_label(description),
+                                      _DESC_LIMITS.get(kind, 60))
         result["content"] = _clip(content, settings.max_text_chars)
         result["error"] = partial_error or ""
     except _ModelError as exc:
