@@ -1,0 +1,21 @@
+[Unit]
+Description=super-context - personal super context service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/super-context
+Environment=HOST=127.0.0.1
+Environment=PORT=8082
+EnvironmentFile=/opt/super-context/.env
+Environment=CONTEXT_DATA=/opt/super-context/data
+Environment=CONTEXT_WEB=/opt/super-context/web
+Environment=CONTEXT_PUBLIC_PREFIX=https://wkeeli.cn/context
+ExecStart=/usr/bin/python3 server.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+# 超级上下文：dev 主机 127.0.0.1:8082 ← frp → aliyun 127.0.0.1:18082
+# 用法：追加到 dev 主机 /opt/frp/frpc.toml 末尾，然后 systemctl restart frpc
+# 前置：dev 主机 systemd 服务 super-context 已在 127.0.0.1:8082 上跑通
+[[proxies]]
+name = "super-context"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8082
+remotePort = 18082

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>超级上下文</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <header class="head">
+      <div class="head-text">
+        <h1>超级上下文</h1>
+        <p class="sub">上传资料生成描述，供智能体取用</p>
+      </div>
+      <button id="theme" type="button" aria-label="切换主题" title="切换主题"></button>
+    </header>
+
+    <div class="content">
+      <!-- 工具栏：统计 + 快捷操作 -->
+      <section class="toolbar" aria-label="工具栏">
+        <p id="stats" class="stats" aria-live="polite">正在加载…</p>
+        <div class="toolbar-actions">
+          <button id="copy-agent-top" class="btn" type="button" disabled>复制智能体链接</button>
+          <button id="refresh" class="btn" type="button">刷新</button>
+        </div>
+      </section>
+
+      <!-- 上传区：点击 / 回车 / 拖拽 -->
+      <section class="block" aria-labelledby="upload-title">
+        <h2 id="upload-title" class="block-title">上传资料</h2>
+        <div id="dropzone" class="dropzone" role="button" tabindex="0"
+             aria-label="选择或拖拽文件上传，支持多选">
+          <p class="dropzone-main">点击选择文件，或拖拽文件到这里</p>
+          <p class="dropzone-hint">支持图片、文档、音频、视频，可一次选择多个</p>
+        </div>
+        <input id="file-input" class="file-input" type="file" multiple tabindex="-1" />
+        <ul id="uploads" class="uploads" aria-label="上传进度"></ul>
+      </section>
+
+      <!-- 智能体链接 -->
+      <section class="block" aria-labelledby="agent-title">
+        <h2 id="agent-title" class="block-title">智能体链接</h2>
+        <div class="link-row">
+          <code id="agent-link" class="agent-url">加载中…</code>
+          <button id="copy-agent" class="btn" type="button" disabled>复制</button>
+        </div>
+        <p class="hint">把这个链接发给智能体，它会按描述取用资料</p>
+      </section>
+
+      <!-- 资料列表 -->
+      <section class="block" aria-labelledby="items-title">
+        <h2 id="items-title" class="block-title">资料列表</h2>
+        <div id="state-area" class="state-area" aria-live="polite"></div>
+        <ul id="item-list" class="item-list" aria-label="资料列表"></ul>
+        <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <p>资料保存在本服务，链接内含访问令牌，请勿外泄。</p>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

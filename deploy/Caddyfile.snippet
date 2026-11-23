@@ -1,0 +1,30 @@
+# ===== 超级上下文（dev 机 127.0.0.1:8082 ← frp 隧道，子路径 /context/）=====
+#
+# 本文件包含两处改动，缺一不可。
+#
+# 【改动 1】全站 Basic Auth 白名单（智能体免登录）
+#   打开 aliyun /etc/caddy/Caddyfile 顶部的 `@not_local { ... }`，追加一行
+#   `not path /context/s/*`，使智能体分享接口（token 自校验）不被全站
+#   Basic Auth 拦截。改完应形如：
+#
+#       @not_local {
+#           not remote_ip 127.0.0.1 ::1 198.51.100.10 10.0.0.0/8 172.16.0.0/12
+#           not path /pc2mb/*
+#           not path /record/*
+#           not path /context/s/*      # ← 新增：超级上下文智能体分享 API 免登录
+#       }
+#
+# 【改动 2】反向代理（本段其余内容）
+#   把下面内容插入 wkeeli.cn { ... } 块内，位置在兜底语句
+#   `reverse_proxy localhost:5000` 之前（建议紧跟 /constraints/ 块之后）。
+#   注意：必须写在整个 Caddyfile 的 `wkeeli.cn { ... }` 块内，不要插到别的站点块。
+#
+# 认证：页面与 UI API（/context/、/context/api/...）走全站 Basic Auth；
+#       智能体分享接口（/context/s/...）靠 URL 里的 token 自校验，免登录。
+#       服务端 Caddy 已用 handle_path 剥掉 /context 前缀，后端收到的仍是 api/...、s/...
+# 生效：caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+
+redir /context /context/ 308
+handle_path /context/* {
+	reverse_proxy 127.0.0.1:18082
+}
