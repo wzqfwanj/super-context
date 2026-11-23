@@ -139,6 +139,7 @@ def describe_file(path: str, name: str, settings: Settings) -> dict:
 
 - 安全/健壮性：文件名去路径与控制字符；静态目录防穿越；请求体上限 413；未知 API 404、方法错 405；全部错误 `{"error":"中文原因"}`；JSON 原子落盘（临时文件 + os.replace）；上传后后台线程生成描述，前端轮询。
 - 原始文件必须原样保存、原样返回（不做转码/转文本）；描述与 `content` 只是检索与辅助信息。
+- 扩展名不可识别时按**文件头**识别 image/audio/video/pdf（`describe.sniff_media`），补扩展名并按真实类型生成标签；`POST api/items/{id}/redescribe` 也会顺带修正历史条目的类型。
 
 ## 5. web 前端（web-ui 交付）
 

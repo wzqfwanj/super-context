@@ -465,7 +465,11 @@
   function updateItemRefs(refs, item) {
     refs.itemId = item.id;
     refs.itemName = typeof item.name === "string" && item.name ? item.name : "未命名文件";
-    setText(refs.name, refs.itemName);
+    /* 超长文件名（如微信保存的图片）只显示前 48 字，完整名保留在 title */
+    var displayedName = refs.itemName.length > 48
+      ? refs.itemName.slice(0, 48) + "…"
+      : refs.itemName;
+    setText(refs.name, displayedName);
     refs.name.title = refs.itemName;
 
     var kind = normalizeKind(item.kind);
@@ -620,7 +624,11 @@
   function createUploadNode(entry) {
     var li = makeEl("li", "upload");
     var top = makeEl("div", "upload-top");
-    var name = makeEl("span", "upload-name", entry.file.name);
+    var shown = entry.file.name.length > 48
+      ? entry.file.name.slice(0, 48) + "…"
+      : entry.file.name;
+    var name = makeEl("span", "upload-name", shown);
+    name.title = entry.file.name;
     var status = makeEl("span", "upload-status", "排队中");
     top.appendChild(name);
     top.appendChild(status);

@@ -208,6 +208,32 @@ class UploadTest(ServerTestCase):
             self.assertEqual(payload["item"]["kind"], kind, name)
             self.wait_status(payload["item"]["id"])
 
+    def test_upload_extensionless_image_is_sniffed(self):
+        """微信保存的图片常是一长串无扩展名文件名，应按文件头识别为图片。"""
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
+        name = "_cgi-bin_mmwebwx-bin_webwxgetmsgimg__&MsgID=1&skey=@crypt_abc&mm"
+        response, payload, _ = self.upload(name, png)
+        self.assertEqual(response.status, 201)
+        item = payload["item"]
+        self.assertEqual(item["kind"], "image")
+        self.assertEqual(item["mime"], "image/png")
+        self.assertTrue(item["name"].endswith(".png"), item["name"])
+        self.assertIn(item["id"] + ".png", os.listdir(os.path.join(self.data_dir, "files")))
+        ready = self.wait_status(item["id"])
+        self.assertEqual(ready["status"], "ready")
+        _, raw = self.request("GET", "/api/items/%s/raw" % item["id"])
+        self.assertEqual(raw, png)
+
+    def test_upload_unknown_extension_uses_sniffed_type(self):
+        jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        response, payload, _ = self.upload("相片.weird", jpeg)
+        self.assertEqual(response.status, 201)
+        item = payload["item"]
+        self.assertEqual(item["kind"], "image")
+        self.assertEqual(item["mime"], "image/jpeg")
+        self.assertEqual(item["name"], "相片.jpg")
+        self.wait_status(item["id"])
+
     def test_upload_chinese_name_header(self):
         response, payload, _ = self.upload("中文 名称.txt", b"hi")
         self.assertEqual(response.status, 201)

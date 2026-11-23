@@ -147,6 +147,32 @@ def md_alt(name: str) -> str:
     return str(name).replace("[", "(").replace("]", ")").replace("\n", " ").strip()
 
 
+def sniff_file(path: str):
+    """按文件头识别 (kind, mime, ext)；describe.py 不可用时返回空。"""
+    if describe_module is None or not hasattr(describe_module, "sniff_media"):
+        return "", "", ""
+    try:
+        kind, mime, ext = describe_module.sniff_media(path)
+    except Exception:
+        return "", "", ""
+    if kind in KINDS:
+        return kind, mime, ext
+    return "", "", ""
+
+
+def append_extension(name: str, ext: str) -> str:
+    """给没有可靠扩展名的文件补上识别出的扩展名（保持 ≤120 字符）。"""
+    if not ext:
+        return name
+    stem = os.path.splitext(name)[0] if safe_ext(name) else name
+    stem = stem.rstrip(" .") or "未命名文件"
+    candidate = stem + ext
+    if len(candidate) > 120:
+        keep = max(1, 120 - len(ext))
+        candidate = (stem[:keep].rstrip() or "未命名文件") + ext
+    return candidate
+
+
 def classify_name(name: str) -> str:
     """文件类型：优先用 describe.classify，缺失时用内置扩展名表。"""
     if describe_module is not None:
@@ -874,8 +900,22 @@ class Handler(BaseHTTPRequestHandler):
 
         kind = classify_name(name)
         mime = guess_mime(name)
+        name_ext = safe_ext(name)
+        final_ext = name_ext
+        if kind == "other":
+            # 没有可靠扩展名（如微信图片的长文件名）时，按文件头判断真实类型
+            sniffed_kind, sniffed_mime, sniffed_ext = sniff_file(dest)
+            if sniffed_kind:
+                kind, mime = sniffed_kind, sniffed_mime
+                final_ext = sniffed_ext or name_ext
+                name = append_extension(name, final_ext)
+        if final_ext and final_ext != name_ext:
+            new_dest = os.path.join(store.files_dir, item_id + final_ext)
+            if new_dest != dest:
+                os.replace(dest, new_dest)
+                dest = new_dest
         try:
-            item = store.add_item(item_id, name, kind, mime, written, ext)
+            item = store.add_item(item_id, name, kind, mime, written, final_ext)
         except BaseException:
             try:
                 os.remove(dest)
@@ -887,13 +927,28 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(201, {"item": item})
 
     def _handle_redescribe(self, item_id: str) -> None:
-        """仅重新生成描述，原始文件保持不动。"""
+        """仅重新生成描述，原始文件保持不动；顺手修正没有扩展名文件的类型。"""
         store = self.server.store
         item = store.get_item(item_id)
         path = store.file_path(item)
         if not os.path.isfile(path):
             raise NotFound("文件不存在")
+        if classify_name(item["name"]) == "other":
+            sniffed_kind, sniffed_mime, sniffed_ext = sniff_file(path)
+            if sniffed_kind:
+                old_path = path
+                new_name = append_extension(item["name"], sniffed_ext)
+                item = store.update_item(item_id, {"name": new_name})
+                path = store.file_path(item)
+                if path != old_path:
+                    try:
+                        os.replace(old_path, path)
+                    except OSError as exc:
+                        log_err("[%s] 重命名文件失败：%s" % (now_iso(), exc))
+                log_out("[%s] 修正资料类型：%s → %s（%s）"
+                        % (now_iso(), item["name"], sniffed_kind, sniffed_mime))
         item = store.mark_processing(item_id)
+        path = store.file_path(item)
         self.server.worker.submit(item_id, path, item["name"])
         log_out("[%s] 重新生成描述：%s" % (now_iso(), item["name"]))
         self._send_json(202, {"item": item})

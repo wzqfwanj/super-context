@@ -159,6 +159,61 @@ class ExtractionTest(unittest.TestCase):
             describe._extract_docx(path, 30000)
 
 
+class SniffTest(unittest.TestCase):
+    """没有扩展名的文件按文件头识别类型（微信图片文件名常见）。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="describe-sniff-")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write(self, data):
+        path = os.path.join(self.dir, "noext")
+        with open(path, "wb") as handle:
+            handle.write(data)
+        return path
+
+    def test_jpeg(self):
+        self.assertEqual(describe.sniff_media(self.write(b"\xff\xd8\xff\xe0" + b"\x00" * 32)),
+                         ("image", "image/jpeg", ".jpg"))
+
+    def test_png(self):
+        self.assertEqual(describe.sniff_media(self.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)),
+                         ("image", "image/png", ".png"))
+
+    def test_gif(self):
+        self.assertEqual(describe.sniff_media(self.write(b"GIF89a" + b"\x00" * 32)),
+                         ("image", "image/gif", ".gif"))
+
+    def test_pdf(self):
+        self.assertEqual(describe.sniff_media(self.write(b"%PDF-1.4\n" + b"\x00" * 32)),
+                         ("document", "application/pdf", ".pdf"))
+
+    def test_mp3(self):
+        self.assertEqual(describe.sniff_media(self.write(b"ID3" + b"\x00" * 32)),
+                         ("audio", "audio/mpeg", ".mp3"))
+
+    def test_wav(self):
+        data = b"RIFF" + b"\x00" * 4 + b"WAVEfmt "
+        self.assertEqual(describe.sniff_media(self.write(data)),
+                         ("audio", "audio/wav", ".wav"))
+
+    def test_mp4(self):
+        data = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32
+        self.assertEqual(describe.sniff_media(self.write(data)),
+                         ("video", "video/mp4", ".mp4"))
+
+    def test_m4a(self):
+        data = b"\x00\x00\x00\x18ftypM4A " + b"\x00" * 32
+        self.assertEqual(describe.sniff_media(self.write(data)),
+                         ("audio", "audio/mp4", ".m4a"))
+
+    def test_unknown_binary(self):
+        self.assertEqual(describe.sniff_media(self.write(b"hello world, plain text")),
+                         ("", "", ""))
+
+
 class DescribeFileFallbackTest(unittest.TestCase):
     """没有 API Key 时 describe_file 也应给出兜底描述且不抛异常。"""
 

@@ -169,7 +169,7 @@ def _fmt_duration(seconds: float) -> str:
 
 def _fallback_description(name: str, kind: str, size: int) -> str:
     return "《%s》（%s，%s）" % (
-        name or "未命名文件",
+        _clip(name or "未命名文件", 40),
         _KIND_ZH.get(kind, "文件"),
         _size_human(size),
     )
@@ -193,6 +193,75 @@ def guess_mime(name: str) -> str:
     except Exception:
         mime = None
     return mime or "application/octet-stream"
+
+
+def sniff_media(path: str) -> tuple:
+    """按文件头猜测 (kind, mime, ext)，用于没有可靠扩展名的文件。
+
+    只判断能可靠识别的图片 / 音频 / 视频 / PDF；识别不了返回 ("", "", "")。
+    例如微信保存的图片文件名可能是一长串 `_cgi-bin_...&skey=...`，没有扩展名。
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(64)
+    except OSError:
+        return "", "", ""
+    if len(head) < 12:
+        return "", "", ""
+
+    def ftyp_brand(data: bytes) -> bytes:
+        if data[4:8] == b"ftyp":
+            return data[8:12].strip().lower()
+        return b""
+
+    # ---- 图片 ----
+    if head[:3] == b"\xff\xd8\xff":
+        return "image", "image/jpeg", ".jpg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image", "image/png", ".png"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image", "image/gif", ".gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image", "image/webp", ".webp"
+    if head[:2] == b"BM":
+        return "image", "image/bmp", ".bmp"
+    if head[:4] in (b"II*\x00", b"MM\x00*"):
+        return "image", "image/tiff", ".tiff"
+    brand = ftyp_brand(head)
+    if brand in (b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"):
+        return "image", "image/heic", ".heic"
+    if brand in (b"avif", b"avio"):
+        return "image", "image/avif", ".avif"
+
+    # ---- 文档 ----
+    if head[:4] == b"%PDF":
+        return "document", "application/pdf", ".pdf"
+
+    # ---- 音频 ----
+    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio", "audio/mpeg", ".mp3"
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "audio", "audio/wav", ".wav"
+    if head[:4] == b"fLaC":
+        return "audio", "audio/flac", ".flac"
+    if head[:4] == b"OggS":
+        return "audio", "audio/ogg", ".ogg"
+    if brand in (b"m4a", b"m4b"):
+        return "audio", "audio/mp4", ".m4a"
+
+    # ---- 视频 ----
+    if brand == b"qt":
+        return "video", "video/quicktime", ".mov"
+    if brand in (b"mp42", b"mp41", b"isom", b"iso2", b"iso5", b"dash", b"avc1", b"m4v",
+                 b"3gp4", b"3gp5", b"3g2a"):
+        return "video", "video/mp4", ".mp4"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "video", "video/webm", ".webm"
+    if head[:3] == b"FLV":
+        return "video", "video/x-flv", ".flv"
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
+        return "video", "video/x-msvideo", ".avi"
+    return "", "", ""
 
 
 @dataclass
